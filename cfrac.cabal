@@ -1,12 +1,28 @@
 cabal-version:      2.4
 name:               cfrac
 version:            0.1.0.0
-author:             Chris Smith
-maintainer:         cdsmith@gmail.com
-extra-source-files: CHANGELOG.md
+synopsis:           Arithmetic with continued fractions
+description:        Defines a new type for continued fractions, and implements
+                    basic arithmetic operations for the type.  Note that
+                    negative numbers are not implemented!
+category:           Math, Numerical
+homepage:           https://github.com/cdsmith/cfrac
+bug-reports:        https://github.com/cdsmith/cfrac/issues
+license:            BSD-3-Clause
+license-file:       LICENSE
+
+author:             Chris Smith <cdsmith@gmail.com>
+maintainer:         Chris Smith <cdsmith@gmail.com>
+
+extra-source-files: CHANGELOG.md, README.md
+
+source-repository head
+    type:     git
+    location: git://github.com/cdsmith/cfrac.git
 
 library
     exposed-modules:  CFrac
     build-depends:    base ^>=4.16.1.0, QuickCheck
     hs-source-dirs:   src
     default-language: Haskell2010
+    ghc-options:      -Wall
