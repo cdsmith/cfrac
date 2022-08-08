@@ -250,6 +250,39 @@ exactPi = gcfToCFrac gcfPi
 -- prop> take 17 (cfToDecimal approxPi) === take 17 (cfToDecimal exactPi)
 -- +++ OK, passed 1 test.
 
+cfSqrtInt :: Integer -> CFrac
+cfSqrtInt n = go 0 1
+  where
+    isqrt :: Integer -> Integer
+    isqrt 0 = 0
+    isqrt x =
+      let y = 2 * isqrt (x `div` 4)
+       in if (y + 1) * (y + 1) > x then y else y + 1
+
+    sqrtn = isqrt n
+
+    go _ 0 = Inf
+    go p q =
+      let m = (p + sqrtn) `div` q
+          p' = m * q - p
+          q' = (n - p' * p') `div` q
+       in m :+/ go p' q'
+
+-- prop> take 50 (cfToDecimal (cfSqrtInt 2)) === take 50 (cfToDecimal sqrt2)
+-- +++ OK, passed 1 test.
+
+-- prop> take 50 (cfToDecimal (cfSqrtInt 3)) === take 50 (cfToDecimal sqrt3)
+-- +++ OK, passed 1 test.
+
+-- prop> take 50 (cfToDecimal (cfSqrtInt 5)) === take 50 (cfToDecimal sqrt5)
+-- +++ OK, passed 1 test.
+
+phi' :: CFrac
+phi' = (cfSqrtInt 5 + 1) / 2
+
+-- prop> take 50 (cfToDecimal phi') === take 50 (cfToDecimal phi)
+-- +++ OK, passed 1 test.
+
 cfRecip :: CFrac -> CFrac
 cfRecip (0 :+/ x) = x
 cfRecip (1 :+/ Inf) = 1 :+/ Inf
