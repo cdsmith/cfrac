@@ -287,16 +287,16 @@ cfSqrtInt n = go 0 1
     isqrt :: Integer -> Integer
     isqrt 0 = 0
     isqrt x =
-      let y = 2 * isqrt (x `div` 4)
+      let y = 2 * isqrt (x `quot` 4)
        in if (y + 1) * (y + 1) > x then y else y + 1
 
     sqrtn = isqrt n
 
     go _ 0 = Inf
     go p q =
-      let m = (p + sqrtn) `div` q
+      let m = (p + sqrtn) `quot` q
           p' = m * q - p
-          q' = (n - p' * p') `div` q
+          q' = (n - p' * p') `quot` q
        in m :+/ go p' q'
 
 -- prop> take 50 (cfToDecimal (cfSqrtInt 2)) === take 50 (cfToDecimal sqrt2)
