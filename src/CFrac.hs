@@ -8,13 +8,10 @@ import Data.Ratio (denominator, numerator, (%))
 import Numeric (showFFloat)
 import Test.QuickCheck
   ( Arbitrary (..),
-    NonNegative (..),
+    NonZero (..),
     Property,
     counterexample,
-    discard,
-    suchThat,
     (===),
-    (==>),
   )
 
 data CFrac where
@@ -36,12 +33,16 @@ fromTerms = foldr (:+/) Inf
 
 cfFromFrac :: Integer -> Integer -> CFrac
 cfFromFrac _ 0 = Inf
-cfFromFrac n d = n `div` d :+/ cfFromFrac d (n `mod` d)
+cfFromFrac n d = q :+/ cfFromFrac d r where (q, r) = n `quotRem` d
 {-# INLINE [2] cfFromFrac #-}
 
 cfFromRational :: Rational -> CFrac
 cfFromRational r = cfFromFrac (numerator r) (denominator r)
 {-# INLINE cfFromRational #-}
+
+cfNegate :: CFrac -> CFrac
+cfNegate Inf = Inf
+cfNegate (n :+/ x) = (-n) :+/ cfNegate x
 
 cycleTerms :: [Integer] -> CFrac
 cycleTerms ns = fix (go ns)
@@ -69,12 +70,25 @@ approxPi = cfFromRational (realToFrac (pi :: Double))
 
 isCanonical :: CFrac -> Bool
 isCanonical Inf = True
-isCanonical (n :+/ cont) = n >= 0 && isCanonicalCont cont
+isCanonical (_ :+/ Inf) = True
+isCanonical (n :+/ cont@(m :+/ _))
+  | n > 0 = isCanonicalPositive cont
+  | n < 0 = isCanonicalNegative cont
+  | m > 0 = isCanonicalPositive cont
+  | m < 0 = isCanonicalNegative cont
+  | otherwise = False
 
-isCanonicalCont :: CFrac -> Bool
-isCanonicalCont Inf = True
-isCanonicalCont (1 :+/ Inf) = False
-isCanonicalCont (n :+/ cont) = n > 0 && isCanonicalCont cont
+isCanonicalPositive :: CFrac -> Bool
+isCanonicalPositive Inf = True
+isCanonicalPositive (n :+/ _) | n <= 0 = False
+isCanonicalPositive (1 :+/ Inf) = False
+isCanonicalPositive (_ :+/ cont) = isCanonicalPositive cont
+
+isCanonicalNegative :: CFrac -> Bool
+isCanonicalNegative Inf = True
+isCanonicalNegative (n :+/ _) | n >= 0 = False
+isCanonicalNegative (-1 :+/ Inf) = False
+isCanonicalNegative (_ :+/ cont) = isCanonicalNegative cont
 
 -- prop> not (isCanonical (2 :+/ (-1) :+/ Inf))
 -- +++ OK, passed 1 test.
@@ -94,7 +108,19 @@ isCanonicalCont (n :+/ cont) = n > 0 && isCanonicalCont cont
 -- prop> isCanonical (2 :+/ Inf)
 -- +++ OK, passed 1 test.
 
--- prop> \(NonNegative x) -> isCanonical (cfFromRational x)
+-- prop> isCanonical (-2 :+/ Inf)
+-- +++ OK, passed 1 test.
+
+-- prop> isCanonical (0 :+/ Inf)
+-- +++ OK, passed 1 test.
+
+-- prop> isCanonical (-2 :+/ (-3) :+/ Inf)
+-- +++ OK, passed 1 test.
+
+-- prop> not (isCanonical (-2 :+/ (-1) :+/ Inf))
+-- +++ OK, passed 1 test.
+
+-- prop> \x -> isCanonical (cfFromRational x)
 -- +++ OK, passed 100 tests.
 
 naiveConvergents :: CFrac -> [Rational]
@@ -102,6 +128,9 @@ naiveConvergents Inf = []
 naiveConvergents (n :+/ r) =
   fromInteger n :
   map (\x -> fromInteger n + 1 / x) (naiveConvergents r)
+
+-- prop> \x -> last (naiveConvergents (cfFromRational x)) == x
+-- +++ OK, passed 100 tests.
 
 data Mobius where
   Mobius :: Integer -> Integer -> Integer -> Integer -> Mobius
@@ -124,21 +153,14 @@ instance Monoid Mobius where
   {-# INLINE mempty #-}
 
 instance Arbitrary Mobius where
-  arbitrary =
-    suchThat
-      ( Mobius
-          <$> arbitrary
-          <*> arbitrary
-          <*> (getNonNegative <$> arbitrary)
-          <*> (getNonNegative <$> arbitrary)
-      )
-      (\(Mobius _ _ c d) -> max c d > 0)
+  arbitrary = do
+    Mobius
+      <$> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
   shrink (Mobius a b c d) =
-    [ Mobius a' b' c' d'
-      | (a', b', NonNegative c', NonNegative d') <-
-          shrink (a, b, NonNegative c, NonNegative d),
-        max c' d' > 0
-    ]
+    [Mobius a' b' c' d' | (a', b', c', d') <- shrink (a, b, c, d)]
 
 -- prop> \(m :: Mobius) -> mempty <> m == m
 -- +++ OK, passed 100 tests.
@@ -160,8 +182,8 @@ convergents = go mempty
 
 -- prop> prop_convergents_matches_naive
 -- +++ OK, passed 100 tests.
-prop_convergents_matches_naive :: NonNegative Rational -> Property
-prop_convergents_matches_naive (NonNegative r) =
+prop_convergents_matches_naive :: Rational -> Property
+prop_convergents_matches_naive r =
   convergents (cfFromRational r)
     === naiveConvergents (cfFromRational r)
 
@@ -172,16 +194,16 @@ cfToRational = go mempty
     go m (n :+/ x) = go (m <> Mobius n 1 1 0) x
 {-# INLINE [2] cfToRational #-}
 
--- prop> \(NonNegative x) -> cfToRational (cfFromRational x) == x
+-- prop> \x -> cfToRational (cfFromRational x) == x
 -- +++ OK, passed 100 tests.
 
-mobiusIntPart :: Mobius -> Maybe Integer
-mobiusIntPart (Mobius a b c d)
-  | c /= 0 && d /= 0 && n1 == n2 = Just n1
+mobiusIntPart :: Integer -> Mobius -> Maybe Integer
+mobiusIntPart sgn (Mobius a b c d)
+  | signum c * sgn == signum d && c /= 0 && d /= 0 && n1 == n2 = Just n1
   | otherwise = Nothing
   where
-    n1 = a `div` c
-    n2 = b `div` d
+    n1 = a `quot` c
+    n2 = b `quot` d
 {-# INLINE mobiusIntPart #-}
 
 cfToBase :: Integer -> CFrac -> [Integer]
@@ -189,7 +211,7 @@ cfToBase base = go mempty
   where
     go (Mobius 0 0 _ _) _ = []
     go m x
-      | Just n <- mobiusIntPart m,
+      | Just n <- mobiusIntPart (cfSignum x) m,
         let m' = Mobius base (-base * n) 0 1 <> m =
           n : go m' x
     go m (n :+/ x) = go (m <> Mobius n 1 1 0) x
@@ -197,15 +219,17 @@ cfToBase base = go mempty
 
 cfToDecimal :: CFrac -> String
 cfToDecimal Inf = "Inf"
-cfToDecimal x = case cfToBase 10 x of
-  [] -> "0.0"
-  [z] -> show z ++ ".0"
-  (z : digits) -> show z ++ "." ++ concatMap show digits
+cfToDecimal x
+  | x >= 0 = case cfToBase 10 x of
+      [] -> "0.0"
+      [z] -> show z ++ ".0"
+      (z : digits) -> show z ++ "." ++ concatMap show digits
+  | otherwise = "-" ++ cfToDecimal (cfNegate x)
 
 -- prop> prop_cfToDecimal_matchesRational
 -- +++ OK, passed 100 tests.
-prop_cfToDecimal_matchesRational :: NonNegative Rational -> Property
-prop_cfToDecimal_matchesRational (NonNegative r) =
+prop_cfToDecimal_matchesRational :: Rational -> Property
+prop_cfToDecimal_matchesRational r =
   take n decFromRat === take n decFromCF
   where
     decFromRat = showFFloat Nothing (realToFrac r :: Double) ""
@@ -227,14 +251,14 @@ gcfToCFrac = go mempty
   where
     go (Mobius a _ c _) GInf = cfFromFrac a c
     go m gcf@((int, numer) :+#/ denom)
-      | Just n <- mobiusIntPart m =
+      | Just n <- mobiusIntPart 1 m =
           n :+/ go (Mobius 0 1 1 (-n) <> m) gcf
       | otherwise = go (m <> Mobius int numer 1 0) denom
 
 -- prop> prop_GCFrac_roundtrip
 -- +++ OK, passed 100 tests.
-prop_GCFrac_roundtrip :: NonNegative Rational -> Property
-prop_GCFrac_roundtrip (NonNegative r) =
+prop_GCFrac_roundtrip :: Rational -> Property
+prop_GCFrac_roundtrip r =
   gcfToCFrac (cfToGCFrac x) === x
   where
     x = cfFromRational r
@@ -291,23 +315,34 @@ cfRecip x = 0 :+/ x
 
 -- prop> prop_cfRecip_selfInverse
 -- +++ OK, passed 100 tests.
-prop_cfRecip_selfInverse :: NonNegative Rational -> Property
-prop_cfRecip_selfInverse (NonNegative r) =
+prop_cfRecip_selfInverse :: Rational -> Property
+prop_cfRecip_selfInverse r =
   cfRecip (cfRecip (cfFromRational r)) === cfFromRational r
 
 -- prop> prop_cfRecip_canonical
 -- +++ OK, passed 100 tests.
-prop_cfRecip_canonical :: NonNegative Rational -> Bool
-prop_cfRecip_canonical (NonNegative r) =
-  isCanonical (cfRecip (cfFromRational r))
+prop_cfRecip_canonical :: Rational -> Bool
+prop_cfRecip_canonical r = isCanonical (cfRecip (cfFromRational r))
 
 -- prop> prop_cfRecip_matchesRational
--- +++ OK, passed 100 tests; 10 discarded.
-prop_cfRecip_matchesRational :: NonNegative Rational -> Property
-prop_cfRecip_matchesRational (NonNegative r) =
-  r /= 0 ==> cfRecip (cfFromRational r) == cfFromRational (recip r)
+-- +++ OK, passed 100 tests.
+prop_cfRecip_matchesRational :: NonZero Rational -> Property
+prop_cfRecip_matchesRational (NonZero r) =
+  cfRecip (cfFromRational r) === cfFromRational (recip r)
+
+cfSignum :: CFrac -> Integer
+cfSignum (0 :+/ Inf) = 0
+cfSignum (a :+/ _) | a < 0 = -1
+cfSignum (0 :+/ (a :+/ _)) | a < 0 = -1
+cfSignum _ = 1
+
+-- prop> \r -> cfSignum (cfFromRational r) === round (signum r)
+-- +++ OK, passed 100 tests.
 
 cfCompare :: CFrac -> CFrac -> Ordering
+cfCompare a b | sgnCmp /= EQ = sgnCmp
+  where
+    sgnCmp = compare (cfSignum a) (cfSignum b)
 cfCompare Inf Inf = EQ
 cfCompare _ Inf = LT
 cfCompare Inf _ = GT
@@ -317,9 +352,8 @@ cfCompare (a :+/ a') (b :+/ b') = case compare a b of
 
 -- prop> prop_cfCompare_matches_Rational
 -- +++ OK, passed 100 tests.
-prop_cfCompare_matches_Rational ::
-  NonNegative Rational -> NonNegative Rational -> Property
-prop_cfCompare_matches_Rational (NonNegative x) (NonNegative y) =
+prop_cfCompare_matches_Rational :: Rational -> Rational -> Property
+prop_cfCompare_matches_Rational x y =
   compare x y === cfCompare (cfFromRational x) (cfFromRational y)
 
 instance Ord CFrac where compare = cfCompare
@@ -328,7 +362,7 @@ cfMobius :: Mobius -> CFrac -> CFrac
 cfMobius (Mobius a _ c _) Inf = cfFromFrac a c
 cfMobius (Mobius _ _ 0 0) _ = Inf
 cfMobius m x
-  | Just n <- mobiusIntPart m =
+  | Just n <- mobiusIntPart (cfSignum x) m =
       n :+/ cfMobius (Mobius 0 1 1 (-n) <> m) x
 cfMobius m (n :+/ x) = cfMobius (m <> Mobius n 1 1 0) x
 {-# INLINE [2] cfMobius #-}
@@ -342,27 +376,18 @@ mobius (Mobius a b c d) x
     q = fromInteger c * x + fromInteger d
 
 -- prop> prop_cfMobius_matches_Rational
--- +++ OK, passed 100 tests; 119 discarded.
-prop_cfMobius_matches_Rational ::
-  Mobius -> NonNegative Rational -> Property
-prop_cfMobius_matches_Rational m (NonNegative r) =
-  case mobius m r of
-    Just x
-      | x >= 0 ->
-          cfMobius m (cfFromRational r) === cfFromRational x
-    _ -> discard
+-- +++ OK, passed 100 tests.
+prop_cfMobius_matches_Rational :: Mobius -> Rational -> Property
+prop_cfMobius_matches_Rational m r = case mobius m r of
+  Just x -> cfMobius m (cfFromRational r) === cfFromRational x
+  _ -> cfMobius m (cfFromRational r) === Inf
 
 -- prop> prop_cfMobius_isCanonical
--- +++ OK, passed 100 tests; 107 discarded.
-prop_cfMobius_isCanonical ::
-  Mobius -> NonNegative Rational -> Property
-prop_cfMobius_isCanonical m (NonNegative r) =
-  case mobius m r of
-    Just rat
-      | rat >= 0 ->
-          let x = cfMobius m (cfFromRational r)
-           in counterexample (show x) (isCanonical x)
-    _ -> discard
+-- +++ OK, passed 100 tests.
+prop_cfMobius_isCanonical :: Mobius -> Rational -> Property
+prop_cfMobius_isCanonical m r =
+  let x = cfMobius m (cfFromRational r)
+   in counterexample (show x) (isCanonical x)
 
 data Bimobius where
   BM ::
@@ -382,55 +407,34 @@ deriving instance Show Bimobius
 
 instance Arbitrary Bimobius where
   arbitrary =
-    suchThat
-      ( BM
-          <$> arbitrary
-          <*> arbitrary
-          <*> arbitrary
-          <*> arbitrary
-          <*> (getNonNegative <$> arbitrary)
-          <*> (getNonNegative <$> arbitrary)
-          <*> (getNonNegative <$> arbitrary)
-          <*> (getNonNegative <$> arbitrary)
-      )
-      (\(BM _ _ _ _ e f g h) -> maximum [e, f, g, h] > 0)
+    BM
+      <$> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
   shrink (BM a b c d e f g h) =
     [ BM a' b' c' d' e' f' g' h'
-      | ( a',
-          b',
-          c',
-          d',
-          NonNegative e',
-          NonNegative f',
-          NonNegative g',
-          NonNegative h'
-          ) <-
-          shrink
-            ( a,
-              b,
-              c,
-              d,
-              NonNegative e,
-              NonNegative f,
-              NonNegative g,
-              NonNegative h
-            ),
-        maximum [e', f', g', h'] > 0
+      | (a', b', c', d', e', f', g', h') <- shrink (a, b, c, d, e, f, g, h)
     ]
 
-bimobiusIntPart :: Bimobius -> Maybe Integer
-bimobiusIntPart (BM a b c d e f g h)
-  | e /= 0 && f /= 0 && g /= 0 && h /= 0
-      && n2 == n1
-      && n3 == n1
-      && n4 == n1 =
+bimobiusIntPart :: Integer -> Integer -> Bimobius -> Maybe Integer
+bimobiusIntPart sgnX sgnY (BM a b c d e f g h)
+  | allEq [sgnX * sgnY * signum e, sgnX * signum f, sgnY * signum g, signum h],
+    allEq [n1, n2, n3, n4] =
       Just n1
   | otherwise = Nothing
   where
-    n1 = a `div` e
-    n2 = b `div` f
-    n3 = c `div` g
-    n4 = d `div` h
+    allEq (x : xs) = all (== x) xs
+    allEq [] = True
+
+    n1 = a `quot` e
+    n2 = b `quot` f
+    n3 = c `quot` g
+    n4 = d `quot` h
 {-# INLINE bimobiusIntPart #-}
 
 -- | @(mob <>|| bimob) x y = mob (bimob x y)@
@@ -495,38 +499,34 @@ bimobius (BM a b c d e f g h) x y
         + fromInteger h
 
 -- prop> prop_mob_o_bimob
--- +++ OK, passed 100 tests; 1 discarded.
+-- +++ OK, passed 100 tests.
 prop_mob_o_bimob ::
   Mobius -> Bimobius -> Rational -> Rational -> Property
 prop_mob_o_bimob mob bimob r1 r2 =
-  case mobius mob =<< bimobius bimob r1 r2 of
-    Just ans -> bimobius (mob <>|| bimob) r1 r2 === Just ans
-    Nothing -> discard
+  bimobius (mob <>|| bimob) r1 r2 === (mobius mob =<< bimobius bimob r1 r2)
 
 -- prop> prop_bimob_o_leftMob
--- +++ OK, passed 100 tests; 2 discarded.
+-- +++ OK, passed 100 tests.
 prop_bimob_o_leftMob ::
   Bimobius -> Mobius -> Rational -> Rational -> Property
 prop_bimob_o_leftMob bimob mob r1 r2 =
-  case (\x -> bimobius bimob x r2) =<< mobius mob r1 of
-    Just ans -> bimobius (bimob ||< mob) r1 r2 === Just ans
-    Nothing -> discard
+  ((\x -> bimobius bimob x r2) =<< mobius mob r1)
+    === bimobius (bimob ||< mob) r1 r2
 
 -- prop> prop_bimob_o_rightMob
 -- +++ OK, passed 100 tests; 2 discarded.
 prop_bimob_o_rightMob ::
   Bimobius -> Mobius -> Rational -> Rational -> Property
 prop_bimob_o_rightMob bimob mob r1 r2 =
-  case (\y -> bimobius bimob r1 y) =<< mobius mob r2 of
-    Just ans -> bimobius (bimob ||> mob) r1 r2 === Just ans
-    Nothing -> discard
+  ((\y -> bimobius bimob r1 y) =<< mobius mob r2)
+    === bimobius (bimob ||> mob) r1 r2
 
 cfBimobius :: Bimobius -> CFrac -> CFrac -> CFrac
 cfBimobius (BM a b _ _ e f _ _) Inf y = cfMobius (Mobius a b e f) y
 cfBimobius (BM a _ c _ e _ g _) x Inf = cfMobius (Mobius a c e g) x
 cfBimobius (BM _ _ _ _ 0 0 0 0) _ _ = Inf
 cfBimobius bm x y
-  | Just n <- bimobiusIntPart bm =
+  | Just n <- bimobiusIntPart (cfSignum x) (cfSignum y) bm =
       let bm' = Mobius 0 1 1 (-n) <>|| bm in n :+/ cfBimobius bm' x y
 cfBimobius bm@(BM _ b c d _ f g h) x@(x0 :+/ x') y@(y0 :+/ y')
   | g == 0 && h == 0 = consumeX
@@ -539,80 +539,51 @@ cfBimobius bm@(BM _ b c d _ f g h) x@(x0 :+/ x') y@(y0 :+/ y')
 {-# INLINE [2] cfBimobius #-}
 
 -- prop> prop_cfBimobius_matches_Rational
--- +++ OK, passed 100 tests; 101 discarded.
-prop_cfBimobius_matches_Rational ::
-  NonNegative Rational ->
-  NonNegative Rational ->
-  Bimobius ->
-  Property
-prop_cfBimobius_matches_Rational
-  (NonNegative r1)
-  (NonNegative r2)
-  bm =
-    case bimobius bm r1 r2 of
-      Just x
-        | x >= 0 ->
-            cfFromRational x
-              === cfBimobius
-                bm
-                (cfFromRational r1)
-                (cfFromRational r2)
-      _ -> discard
+-- +++ OK, passed 100 tests.
+prop_cfBimobius_matches_Rational :: Rational -> Rational -> Bimobius -> Property
+prop_cfBimobius_matches_Rational r1 r2 bm =
+  case bimobius bm r1 r2 of
+    Just x ->
+      cfBimobius
+        bm
+        (cfFromRational r1)
+        (cfFromRational r2)
+        === cfFromRational x
+    _ ->
+      cfBimobius
+        bm
+        (cfFromRational r1)
+        (cfFromRational r2)
+        === Inf
 
 -- prop> prop_cfBimobius_isCanonical
--- +++ OK, passed 100 tests; 121 discarded.
-prop_cfBimobius_isCanonical ::
-  NonNegative Rational ->
-  NonNegative Rational ->
-  Bimobius ->
-  Bool
-prop_cfBimobius_isCanonical
-  (NonNegative r1)
-  (NonNegative r2)
-  bm =
-    case bimobius bm r1 r2 of
-      Just x
-        | x >= 0 ->
-            isCanonical
-              (cfBimobius bm (cfFromRational r1) (cfFromRational r2))
-      _ -> discard
-
-checkNonNegative :: CFrac -> CFrac
-checkNonNegative Inf = Inf
-checkNonNegative x@(x0 :+/ x')
-  | x < 0 = error "checkNonNegative: CFrac is negative"
-  | x > 0 = x
-  | otherwise = x0 :+/ checkNonNegative x'
-{-# INLINE checkNonNegative #-}
-
-cfFromInteger :: Integer -> CFrac
-cfFromInteger n = n :+/ Inf
-{-# INLINE [2] cfFromInteger #-}
+-- +++ OK, passed 100 tests.
+prop_cfBimobius_isCanonical :: Rational -> Rational -> Bimobius -> Bool
+prop_cfBimobius_isCanonical r1 r2 bm =
+  isCanonical (cfBimobius bm (cfFromRational r1) (cfFromRational r2))
 
 instance Num CFrac where
-  fromInteger n
-    | n >= 0 = cfFromInteger n
-    | otherwise = error "fromInteger: CFrac cannot be negative"
+  fromInteger n = n :+/ Inf
   {-# INLINE fromInteger #-}
 
   (+) = cfBimobius (BM 0 1 1 0 0 0 0 1)
   {-# INLINE (+) #-}
 
-  x - y = checkNonNegative (cfBimobius (BM 0 1 (-1) 0 0 0 0 1) x y)
+  (-) = cfBimobius (BM 0 1 (-1) 0 0 0 0 1)
   {-# INLINE (-) #-}
 
   (*) = cfBimobius (BM 1 0 0 0 0 0 0 1)
   {-# INLINE (*) #-}
 
-  signum (0 :+/ Inf) = 0
-  signum _ = 1
+  signum = fromInteger . cfSignum
   {-# INLINE signum #-}
 
-  abs = id
+  abs x
+    | cfSignum x < 0 = cfNegate x
+    | otherwise = x
   {-# INLINE abs #-}
 
-  negate (0 :+/ Inf) = 0 :+/ Inf
-  negate _ = error "negate: CFrac cannot be negative"
+  negate = cfNegate
   {-# INLINE negate #-}
 
 instance Real CFrac where
@@ -629,9 +600,7 @@ instance RealFrac CFrac where
   {-# INLINE properFraction #-}
 
 instance Fractional CFrac where
-  fromRational x
-    | x < 0 = error "fromRational: CFrac cannot be negative"
-    | otherwise = cfFromRational x
+  fromRational = cfFromRational
   {-# INLINE fromRational #-}
 
   recip = cfRecip
@@ -642,7 +611,7 @@ instance Fractional CFrac where
 
 {-# RULES
 "cfrac/cfRecip" forall x. cfRecip (cfRecip x) = x
-"cfrac/intToRat" forall n. cfToRational (cfFromInteger n) = fromInteger n
+"cfrac/intToRat" forall n. cfToRational (n :+/ Inf) = fromInteger n
   #-}
 
 {-# RULES
