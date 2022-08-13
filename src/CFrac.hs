@@ -25,6 +25,10 @@ deriving instance Show CFrac
 
 infixr 5 :+/
 
+instance Arbitrary CFrac where
+  arbitrary = cfFromRational <$> arbitrary
+  shrink = map cfFromRational . shrink . cfToRational
+
 terms :: CFrac -> [Integer]
 terms Inf = []
 terms (n :+/ x) = n : terms x
@@ -43,7 +47,7 @@ cfFromRational r = cfFromFrac (numerator r) (denominator r)
 
 cfNegate :: CFrac -> CFrac
 cfNegate Inf = Inf
-cfNegate (n :+/ x) = (-n) :+/ cfNegate x
+cfNegate (n :+/ x) = (- n) :+/ cfNegate x
 
 cycleTerms :: [Integer] -> CFrac
 cycleTerms ns = fix (go ns)
@@ -138,6 +142,8 @@ data Mobius where
 
 deriving instance Eq Mobius
 
+deriving instance Ord Mobius
+
 deriving instance Show Mobius
 
 instance Semigroup Mobius where
@@ -213,8 +219,8 @@ cfToBase base = go mempty
     go (Mobius 0 0 _ _) _ = []
     go m x
       | Just n <- mobiusIntPart (cfSignum x) m,
-        let m' = Mobius base (-base * n) 0 1 <> m =
-          n : go m' x
+        let m' = Mobius base (- base * n) 0 1 <> m =
+        n : go m' x
     go m (n :+/ x) = go (m <> Mobius n 1 1 0) x
     go (Mobius a _ c _) Inf = go (Mobius a a c c) Inf
 
@@ -222,9 +228,9 @@ cfToDecimal :: CFrac -> String
 cfToDecimal Inf = "Inf"
 cfToDecimal x
   | x >= 0 = case cfToBase 10 x of
-      [] -> "0.0"
-      [z] -> show z ++ ".0"
-      (z : digits) -> show z ++ "." ++ concatMap show digits
+    [] -> "0.0"
+    [z] -> show z ++ ".0"
+    (z : digits) -> show z ++ "." ++ concatMap show digits
   | otherwise = "-" ++ cfToDecimal (cfNegate x)
 
 -- prop> prop_cfToDecimal_matchesRational
@@ -253,7 +259,7 @@ gcfToCFrac = go mempty
     go (Mobius a _ c _) GInf = cfFromFrac a c
     go m gcf@((int, numer) :+#/ denom)
       | Just n <- mobiusIntPart 1 m =
-          n :+/ go (Mobius 0 1 1 (-n) <> m) gcf
+        n :+/ go (Mobius 0 1 1 (- n) <> m) gcf
       | otherwise = go (m <> Mobius int numer 1 0) denom
 
 -- prop> prop_GCFrac_roundtrip
@@ -365,7 +371,7 @@ cfMobius (Mobius _ _ 0 0) _ = Inf
 cfMobius (Mobius 0 b 0 d) _ = cfFromFrac b d
 cfMobius m x
   | Just n <- mobiusIntPart (cfSignum x) m =
-      n :+/ cfMobius (Mobius 0 1 1 (-n) <> m) x
+    n :+/ cfMobius (Mobius 0 1 1 (- n) <> m) x
 cfMobius m (n :+/ x) = cfMobius (m <> Mobius n 1 1 0) x
 {-# INLINE [2] cfMobius #-}
 
@@ -405,6 +411,8 @@ data Bimobius where
 
 deriving instance Eq Bimobius
 
+deriving instance Ord Bimobius
+
 deriving instance Show Bimobius
 
 instance Arbitrary Bimobius where
@@ -427,7 +435,7 @@ bimobiusIntPart :: Integer -> Integer -> Bimobius -> Maybe Integer
 bimobiusIntPart sgnX sgnY (BM a b c d e f g h)
   | allEq [sgnX * sgnY * signum e, sgnX * signum f, sgnY * signum g, signum h],
     allEq [n1, n2, n3, n4] =
-      Just n1
+    Just n1
   | otherwise = Nothing
   where
     allEq (x : xs) = all (== x) xs
@@ -539,7 +547,7 @@ cfBimobius (BM 0 0 c d 0 0 g h) _ y = cfMobius (Mobius c d g h) y
 cfBimobius (BM 0 b 0 d 0 f 0 h) x _ = cfMobius (Mobius b d f h) x
 cfBimobius bm x y
   | Just n <- bimobiusIntPart (cfSignum x) (cfSignum y) bm =
-      let bm' = Mobius 0 1 1 (-n) <>|| bm in n :+/ cfBimobius bm' x y
+    let bm' = Mobius 0 1 1 (- n) <>|| bm in n :+/ cfBimobius bm' x y
 cfBimobius bm@(BM _ b c d _ f g h) x@(x0 :+/ x') y@(y0 :+/ y')
   | g == 0 && h == 0 = consumeX
   | h == 0 || h == 0 = consumeY
