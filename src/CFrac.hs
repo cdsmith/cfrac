@@ -11,6 +11,7 @@ import Test.QuickCheck
     NonZero (..),
     Property,
     counterexample,
+    discard,
     (===),
   )
 
@@ -361,6 +362,7 @@ instance Ord CFrac where compare = cfCompare
 cfMobius :: Mobius -> CFrac -> CFrac
 cfMobius (Mobius a _ c _) Inf = cfFromFrac a c
 cfMobius (Mobius _ _ 0 0) _ = Inf
+cfMobius (Mobius 0 b 0 d) _ = cfFromFrac b d
 cfMobius m x
   | Just n <- mobiusIntPart (cfSignum x) m =
       n :+/ cfMobius (Mobius 0 1 1 (-n) <> m) x
@@ -506,25 +508,35 @@ prop_mob_o_bimob mob bimob r1 r2 =
   bimobius (mob <>|| bimob) r1 r2 === (mobius mob =<< bimobius bimob r1 r2)
 
 -- prop> prop_bimob_o_leftMob
--- +++ OK, passed 100 tests.
+-- +++ OK, passed 100 tests; 10 discarded.
+--
+-- Rational lacks an explicit representation for infinity, so we skip cases
+-- where the mobius function yields an infinite result.
 prop_bimob_o_leftMob ::
   Bimobius -> Mobius -> Rational -> Rational -> Property
 prop_bimob_o_leftMob bimob mob r1 r2 =
-  ((\x -> bimobius bimob x r2) =<< mobius mob r1)
-    === bimobius (bimob ||< mob) r1 r2
+  case mobius mob r1 of
+    Just x -> bimobius bimob x r2 === bimobius (bimob ||< mob) r1 r2
+    Nothing -> discard
 
 -- prop> prop_bimob_o_rightMob
--- +++ OK, passed 100 tests; 2 discarded.
+-- +++ OK, passed 100 tests; 10 discarded.
+--
+-- Rational lacks an explicit representation for infinity, so we skip cases
+-- where the mobius function yields an infinite result.
 prop_bimob_o_rightMob ::
   Bimobius -> Mobius -> Rational -> Rational -> Property
 prop_bimob_o_rightMob bimob mob r1 r2 =
-  ((\y -> bimobius bimob r1 y) =<< mobius mob r2)
-    === bimobius (bimob ||> mob) r1 r2
+  case mobius mob r2 of
+    Just y -> bimobius bimob r1 y === bimobius (bimob ||> mob) r1 r2
+    Nothing -> discard
 
 cfBimobius :: Bimobius -> CFrac -> CFrac -> CFrac
 cfBimobius (BM a b _ _ e f _ _) Inf y = cfMobius (Mobius a b e f) y
 cfBimobius (BM a _ c _ e _ g _) x Inf = cfMobius (Mobius a c e g) x
 cfBimobius (BM _ _ _ _ 0 0 0 0) _ _ = Inf
+cfBimobius (BM 0 0 c d 0 0 g h) _ y = cfMobius (Mobius c d g h) y
+cfBimobius (BM 0 b 0 d 0 f 0 h) x _ = cfMobius (Mobius b d f h) x
 cfBimobius bm x y
   | Just n <- bimobiusIntPart (cfSignum x) (cfSignum y) bm =
       let bm' = Mobius 0 1 1 (-n) <>|| bm in n :+/ cfBimobius bm' x y
@@ -542,19 +554,8 @@ cfBimobius bm@(BM _ b c d _ f g h) x@(x0 :+/ x') y@(y0 :+/ y')
 -- +++ OK, passed 100 tests.
 prop_cfBimobius_matches_Rational :: Rational -> Rational -> Bimobius -> Property
 prop_cfBimobius_matches_Rational r1 r2 bm =
-  case bimobius bm r1 r2 of
-    Just x ->
-      cfBimobius
-        bm
-        (cfFromRational r1)
-        (cfFromRational r2)
-        === cfFromRational x
-    _ ->
-      cfBimobius
-        bm
-        (cfFromRational r1)
-        (cfFromRational r2)
-        === Inf
+  cfBimobius bm (cfFromRational r1) (cfFromRational r2)
+    === maybe Inf cfFromRational (bimobius bm r1 r2)
 
 -- prop> prop_cfBimobius_isCanonical
 -- +++ OK, passed 100 tests.
