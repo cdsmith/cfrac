@@ -5,10 +5,36 @@
 
 module Main where
 
-import CFrac (CFrac (..))
-import Test.Hspec (describe, hspec)
+import CFrac
+  ( CFrac (..),
+    Mobius,
+    bimobius,
+    cfBimobius,
+    cfMobius,
+    cfToGCFrac,
+    convergents,
+    exactPi,
+    gcfToCFrac,
+    isCanonical,
+    mobius,
+    phi,
+    sqrtInt,
+    toDecimal,
+    (<>||),
+    (||<),
+    (||>),
+  )
+import Numeric (showFFloat)
+import Test.Hspec (describe, hspec, it, shouldBe)
 import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck (Negative (..), NonNegative (..), NonZero (..), Positive (..), (===))
+import Test.QuickCheck
+  ( Negative (..),
+    NonNegative (..),
+    NonZero (..),
+    Positive (..),
+    discard,
+    (===),
+  )
 
 main :: IO ()
 main = hspec $ do
@@ -77,3 +103,81 @@ main = hspec $ do
     prop "def. of signum, zero" $ signum 0 === (0 :: CFrac)
     prop "signum Inf" $ signum Inf === 1
     prop "abs and signum" $ \(x :: CFrac) -> signum x * abs x === x
+
+  describe "isCanonical" $ do
+    it "checks for canonical representation" $ do
+      isCanonical (2 :+/ (-1) :+/ Inf) `shouldBe` False
+      isCanonical (1 :+/ 2 :+/ Inf) `shouldBe` True
+      isCanonical (1 :+/ 0 :+/ 2 :+/ Inf) `shouldBe` False
+      isCanonical (3 :+/ Inf) `shouldBe` True
+      isCanonical (1 :+/ 1 :+/ Inf) `shouldBe` False
+      isCanonical (2 :+/ Inf) `shouldBe` True
+      isCanonical (-2 :+/ Inf) `shouldBe` True
+      isCanonical (0 :+/ Inf) `shouldBe` True
+      isCanonical (-2 :+/ (-3) :+/ Inf) `shouldBe` True
+      isCanonical (-2 :+/ (-1) :+/ Inf) `shouldBe` False
+      isCanonical Inf `shouldBe` True
+
+    prop "fromRational" $ \x -> isCanonical (fromRational x)
+    prop "recip" $ \x -> isCanonical (recip x)
+    prop "cfMobius" $ \m x -> isCanonical (cfMobius m x)
+    prop "cfBimobius" $ \m x y -> isCanonical (cfBimobius m x y)
+
+  describe "Mobius" $ do
+    prop "left identity" $ \(m :: Mobius) -> mempty <> m === m
+    prop "right identity" $ \(m :: Mobius) -> m <> mempty === m
+    prop "assoc" $
+      \(m1 :: Mobius) m2 m3 -> (m1 <> m2) <> m3 === m1 <> (m2 <> m3)
+
+  describe "convergents" $ do
+    prop "ends at original" $ \r -> last (convergents (fromRational r)) === r
+    it "gives expected answers" $ do
+      take 4 (convergents exactPi) `shouldBe` [3, 22 / 7, 333 / 106, 355 / 113]
+      take 6 (convergents phi) `shouldBe` [1, 2, 3 / 2, 5 / 3, 8 / 5, 13 / 8]
+
+  describe "toDecimal" $ do
+    prop "matches Rational" $ \r ->
+      let decFromRat = showFFloat Nothing (realToFrac r :: Double) ""
+          decFromCFrac = toDecimal (fromRational r)
+          n = max 10 (length decFromRat - 1)
+       in take n decFromRat == take n decFromCFrac
+    it "gives lots of decimal places of pi" $
+      take 50 (toDecimal exactPi)
+        `shouldBe` "3.141592653589793238462643383279502884197169399375"
+
+  describe "GCFrac" $ do
+    prop "roundtrips with CFrac" $ \cf -> gcfToCFrac (cfToGCFrac cf) === cf
+
+  describe "sqrtInt" $ do
+    it "computes sqrt 2" $
+      take 50 (toDecimal (sqrtInt 2))
+        `shouldBe` "1.414213562373095048801688724209698078569671875376"
+    it "computes sqrt 3" $
+      take 50 (toDecimal (sqrtInt 3))
+        `shouldBe` "1.732050807568877293527446341505872366942805253810"
+    it "computes sqrt 5" $
+      take 50 (toDecimal (sqrtInt 5))
+        `shouldBe` "2.236067977499789696409173668731276235440618359611"
+
+  describe "matches Rational" $ do
+    prop "recip" $ \(NonZero r) ->
+      recip (fromRational r :: CFrac) === fromRational (recip r)
+    prop "signum" $ \r ->
+      signum (fromRational r :: CFrac) === fromRational (signum r)
+    prop "compare" $ \x y ->
+      compare x y === compare (fromRational x :: CFrac) (fromRational y)
+    prop "cfMobius" $ \m r ->
+      case mobius m r of
+        Just x -> cfMobius m (fromRational r) === fromRational x
+        Nothing -> cfMobius m (fromRational r) === Inf
+    prop "<>||" $ \mob bimob (r1 :: Rational) r2 ->
+      bimobius (mob <>|| bimob) r1 r2 === (mobius mob =<< bimobius bimob r1 r2)
+    prop "||<" $ \bimob mob (r1 :: Rational) r2 -> case mobius mob r1 of
+      Just x -> bimobius bimob x r2 === bimobius (bimob ||< mob) r1 r2
+      Nothing -> discard
+    prop "||<" $ \bimob mob (r1 :: Rational) r2 -> case mobius mob r2 of
+      Just y -> bimobius bimob r1 y === bimobius (bimob ||> mob) r1 r2
+      Nothing -> discard
+    prop "cfBimobius" $ \bm r1 r2 ->
+      cfBimobius bm (fromRational r1) (fromRational r2)
+        === maybe Inf fromRational (bimobius bm r1 r2)
