@@ -1,7 +1,32 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
-module CFrac where
+module CFrac
+  ( CFrac (..),
+    isCanonical,
+    terms,
+    convergents,
+    toDecimal,
+
+    exactPi,
+    exp1,
+    phi,
+    sqrtInt,
+
+    GCFrac (..),
+    toGCFrac,
+    fromGCFrac,
+
+    Mobius (..),
+    cfMobius,
+
+    Bimobius (..),
+    cfBimobius,
+    (<>||),
+    (||<),
+    (||>),
+  )
+where
 
 import Data.Function (fix)
 import Data.Ratio (denominator, numerator, (%))
@@ -47,23 +72,11 @@ cycleTerms ns = fix (go ns)
     go [] x = x
     go (t : ts) x = t :+/ go ts x
 
-sqrt2 :: CFrac
-sqrt2 = 1 :+/ cycleTerms [2]
-
-sqrt3 :: CFrac
-sqrt3 = 1 :+/ cycleTerms [1, 2]
-
-sqrt5 :: CFrac
-sqrt5 = 2 :+/ cycleTerms [4]
-
 phi :: CFrac
 phi = cycleTerms [1]
 
 exp1 :: CFrac
 exp1 = 2 :+/ fromTerms (concatMap (\n -> [1, 2 * n, 1]) [1 ..])
-
-approxPi :: CFrac
-approxPi = cfFromRational (realToFrac (pi :: Double))
 
 isCanonical :: CFrac -> Bool
 isCanonical Inf = True
@@ -86,12 +99,6 @@ isCanonicalNegative Inf = True
 isCanonicalNegative (n :+/ _) | n >= 0 = False
 isCanonicalNegative (-1 :+/ Inf) = False
 isCanonicalNegative (_ :+/ cont) = isCanonicalNegative cont
-
-naiveConvergents :: CFrac -> [Rational]
-naiveConvergents Inf = []
-naiveConvergents (n :+/ r) =
-  fromInteger n :
-  map (\x -> fromInteger n + 1 / x) (naiveConvergents r)
 
 data Mobius where
   Mobius :: Integer -> Integer -> Integer -> Integer -> Mobius
@@ -176,12 +183,12 @@ data GCFrac where
 
 deriving instance Show GCFrac
 
-cfToGCFrac :: CFrac -> GCFrac
-cfToGCFrac Inf = GInf
-cfToGCFrac (n :+/ x) = (n, 1) :+#/ cfToGCFrac x
+toGCFrac :: CFrac -> GCFrac
+toGCFrac Inf = GInf
+toGCFrac (n :+/ x) = (n, 1) :+#/ toGCFrac x
 
-gcfToCFrac :: GCFrac -> CFrac
-gcfToCFrac = go mempty
+fromGCFrac :: GCFrac -> CFrac
+fromGCFrac = go mempty
   where
     go (Mobius a _ c _) GInf = cfFromFrac a c
     go m gcf@((int, numer) :+#/ denom)
@@ -195,7 +202,7 @@ gcfPi = (0, 4) :+#/ go 1
     go i = (2 * i - 1, i * i) :+#/ go (i + 1)
 
 exactPi :: CFrac
-exactPi = gcfToCFrac gcfPi
+exactPi = fromGCFrac gcfPi
 
 sqrtInt :: Integer -> CFrac
 sqrtInt n = go 0 1
@@ -222,7 +229,7 @@ cfRecip x = 0 :+/ x
 {-# INLINE [2] cfRecip #-}
 
 cfSignum :: CFrac -> Integer
-cfSignum (0 :+/ Inf) = 0
+cfSignum (n :+/ Inf) = signum n
 cfSignum (a :+/ _) | a < 0 = -1
 cfSignum (0 :+/ (a :+/ _)) | a < 0 = -1
 cfSignum _ = 1
@@ -249,14 +256,6 @@ cfMobius m x
       n :+/ cfMobius (Mobius 0 1 1 (-n) <> m) x
 cfMobius m (n :+/ x) = cfMobius (m <> Mobius n 1 1 0) x
 {-# INLINE [2] cfMobius #-}
-
-mobius :: (Eq a, Fractional a) => Mobius -> a -> Maybe a
-mobius (Mobius a b c d) x
-  | q == 0 = Nothing
-  | otherwise = Just (p / q)
-  where
-    p = fromInteger a * x + fromInteger b
-    q = fromInteger c * x + fromInteger d
 
 data Bimobius where
   BM ::
@@ -352,22 +351,6 @@ BM a1 b1 c1 d1 e1 f1 g1 h1 ||> Mobius a2 b2 c2 d2 =
     g = g1 * a2 + h1 * c2
     h = g1 * b2 + h1 * d2
 {-# INLINE (||>) #-}
-
-bimobius :: (Eq a, Fractional a) => Bimobius -> a -> a -> Maybe a
-bimobius (BM a b c d e f g h) x y
-  | q == 0 = Nothing
-  | otherwise = Just (p / q)
-  where
-    p =
-      fromInteger a * x * y
-        + fromInteger b * x
-        + fromInteger c * y
-        + fromInteger d
-    q =
-      fromInteger e * x * y
-        + fromInteger f * x
-        + fromInteger g * y
-        + fromInteger h
 
 cfBimobius :: Bimobius -> CFrac -> CFrac -> CFrac
 cfBimobius (BM a b _ _ e f _ _) Inf y = cfMobius (Mobius a b e f) y

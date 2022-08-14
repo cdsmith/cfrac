@@ -3,23 +3,22 @@
 
 {-# HLINT ignore #-}
 
-module Main where
+module Main (main) where
 
 import CFrac
-  ( CFrac (..),
-    Mobius,
-    bimobius,
+  ( Bimobius (..),
+    CFrac (..),
+    Mobius (..),
     cfBimobius,
     cfMobius,
-    cfToGCFrac,
     convergents,
     exactPi,
-    gcfToCFrac,
+    fromGCFrac,
     isCanonical,
-    mobius,
     phi,
     sqrtInt,
     toDecimal,
+    toGCFrac,
     (<>||),
     (||<),
     (||>),
@@ -35,6 +34,36 @@ import Test.QuickCheck
     discard,
     (===),
   )
+
+naiveConvergents :: CFrac -> [Rational]
+naiveConvergents Inf = []
+naiveConvergents (n :+/ r) =
+  fromInteger n :
+  map (\x -> fromInteger n + 1 / x) (naiveConvergents r)
+
+rationalMobius :: Mobius -> Rational -> Maybe Rational
+rationalMobius (Mobius a b c d) x
+  | q == 0 = Nothing
+  | otherwise = Just (p / q)
+  where
+    p = fromInteger a * x + fromInteger b
+    q = fromInteger c * x + fromInteger d
+
+rationalBimobius :: Bimobius -> Rational -> Rational -> Maybe Rational
+rationalBimobius (BM a b c d e f g h) x y
+  | q == 0 = Nothing
+  | otherwise = Just (p / q)
+  where
+    p =
+      fromInteger a * x * y
+        + fromInteger b * x
+        + fromInteger c * y
+        + fromInteger d
+    q =
+      fromInteger e * x * y
+        + fromInteger f * x
+        + fromInteger g * y
+        + fromInteger h
 
 main :: IO ()
 main = hspec $ do
@@ -134,6 +163,8 @@ main = hspec $ do
     it "gives expected answers" $ do
       take 4 (convergents exactPi) `shouldBe` [3, 22 / 7, 333 / 106, 355 / 113]
       take 6 (convergents phi) `shouldBe` [1, 2, 3 / 2, 5 / 3, 8 / 5, 13 / 8]
+    prop "agrees with naive implementation" $
+      \cf -> convergents cf === naiveConvergents cf
 
   describe "toDecimal" $ do
     prop "matches Rational" $ \r ->
@@ -141,12 +172,12 @@ main = hspec $ do
           decFromCFrac = toDecimal (fromRational r)
           n = max 10 (length decFromRat - 1)
        in take n decFromRat == take n decFromCFrac
-    it "gives lots of decimal places of pi" $
+    it "gives known constants" $
       take 50 (toDecimal exactPi)
         `shouldBe` "3.141592653589793238462643383279502884197169399375"
 
   describe "GCFrac" $ do
-    prop "roundtrips with CFrac" $ \cf -> gcfToCFrac (cfToGCFrac cf) === cf
+    prop "roundtrips with CFrac" $ \cf -> fromGCFrac (toGCFrac cf) === cf
 
   describe "sqrtInt" $ do
     it "computes sqrt 2" $
@@ -162,22 +193,36 @@ main = hspec $ do
   describe "matches Rational" $ do
     prop "recip" $ \(NonZero r) ->
       recip (fromRational r :: CFrac) === fromRational (recip r)
+
     prop "signum" $ \r ->
       signum (fromRational r :: CFrac) === fromRational (signum r)
+
     prop "compare" $ \x y ->
       compare x y === compare (fromRational x :: CFrac) (fromRational y)
+
     prop "cfMobius" $ \m r ->
-      case mobius m r of
+      case rationalMobius m r of
         Just x -> cfMobius m (fromRational r) === fromRational x
         Nothing -> cfMobius m (fromRational r) === Inf
+
     prop "<>||" $ \mob bimob (r1 :: Rational) r2 ->
-      bimobius (mob <>|| bimob) r1 r2 === (mobius mob =<< bimobius bimob r1 r2)
-    prop "||<" $ \bimob mob (r1 :: Rational) r2 -> case mobius mob r1 of
-      Just x -> bimobius bimob x r2 === bimobius (bimob ||< mob) r1 r2
-      Nothing -> discard
-    prop "||<" $ \bimob mob (r1 :: Rational) r2 -> case mobius mob r2 of
-      Just y -> bimobius bimob r1 y === bimobius (bimob ||> mob) r1 r2
-      Nothing -> discard
+      rationalBimobius (mob <>|| bimob) r1 r2
+        === (rationalMobius mob =<< rationalBimobius bimob r1 r2)
+
+    prop "||<" $ \bimob mob (r1 :: Rational) r2 ->
+      case rationalMobius mob r1 of
+        Just x ->
+          rationalBimobius bimob x r2
+            === rationalBimobius (bimob ||< mob) r1 r2
+        Nothing -> discard
+
+    prop "||<" $ \bimob mob (r1 :: Rational) r2 ->
+      case rationalMobius mob r2 of
+        Just y ->
+          rationalBimobius bimob r1 y
+            === rationalBimobius (bimob ||> mob) r1 r2
+        Nothing -> discard
+
     prop "cfBimobius" $ \bm r1 r2 ->
       cfBimobius bm (fromRational r1) (fromRational r2)
-        === maybe Inf fromRational (bimobius bm r1 r2)
+        === maybe Inf fromRational (rationalBimobius bm r1 r2)

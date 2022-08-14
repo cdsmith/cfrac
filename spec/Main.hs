@@ -5,13 +5,21 @@ module Main where
 
 #if MIN_VERSION_base(4,15,0)
 
-main :: IO ()
-main = putStrLn "Sorry, QuickSpec requires GHC earlier than 9.0."
+-- No imports
 
 #else
 
 import CFrac (Bimobius, CFrac (..), Mobius)
 import QuickSpec (con, mono, prelude, quickSpec)
+
+#endif
+
+#if MIN_VERSION_base(4,15,0)
+
+main :: IO ()
+main = putStrLn "Sorry, QuickSpec requires GHC earlier than 9.0."
+
+#else
 
 main :: IO ()
 main =
