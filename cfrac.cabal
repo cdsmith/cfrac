@@ -3,8 +3,7 @@ name:               cfrac
 version:            0.1.0.0
 synopsis:           Arithmetic with continued fractions
 description:        Defines a new type for continued fractions, and implements
-                    basic arithmetic operations for the type.  Note that
-                    negative numbers are not implemented!
+                    basic arithmetic operations for the type.
 category:           Math, Numerical
 homepage:           https://github.com/cdsmith/cfrac
 bug-reports:        https://github.com/cdsmith/cfrac/issues
