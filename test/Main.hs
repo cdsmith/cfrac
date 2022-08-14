@@ -13,10 +13,11 @@ import CFrac
     cfMobius,
     convergents,
     exactPi,
+    exp1,
     fromGCFrac,
     isCanonical,
-    phi,
     sqrtInt,
+    terms,
     toDecimal,
     toGCFrac,
     (<>||),
@@ -162,7 +163,7 @@ main = hspec $ do
     prop "ends at original" $ \r -> last (convergents (fromRational r)) === r
     it "gives expected answers" $ do
       take 4 (convergents exactPi) `shouldBe` [3, 22 / 7, 333 / 106, 355 / 113]
-      take 6 (convergents phi) `shouldBe` [1, 2, 3 / 2, 5 / 3, 8 / 5, 13 / 8]
+      take 4 (convergents exp1) `shouldBe` [2, 3, 8 / 3, 11 / 4]
     prop "agrees with naive implementation" $
       \cf -> convergents cf === naiveConvergents cf
 
@@ -226,3 +227,14 @@ main = hspec $ do
     prop "cfBimobius" $ \bm r1 r2 ->
       cfBimobius bm (fromRational r1) (fromRational r2)
         === maybe Inf fromRational (rationalBimobius bm r1 r2)
+
+  describe "known constants" $ do
+    it "defines sqrt2" $
+      take 10 (terms (sqrtInt 2)) `shouldBe` [1, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+    it "defines sqrt3" $
+      take 10 (terms (sqrtInt 3)) `shouldBe` [1, 1, 2, 1, 2, 1, 2, 1, 2, 1]
+    it "defines sqrt5" $
+      take 10 (terms (sqrtInt 5)) `shouldBe` [2, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+    it "defines phi" $
+      take 10 (terms ((1 + sqrtInt 5) / 2))
+        `shouldBe` [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]

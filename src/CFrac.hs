@@ -1,17 +1,31 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
+-- | Arithmetic with continued fractions.
+--
+-- The main type defined in this module is 'CFrac', which represents a real
+-- number using a (simple) continued fraction.  Most of the use of 'CFrac'
+-- happens via the standard numeric type classes, but there are some additional
+-- functions defined here, as well.
+--
+-- Beware: A fundamental limitation of this approach is that exact arithmetic on
+-- irrational numbers that should yield a rational result will instead fail to
+-- terminate.  This happens because one must observe the entire infinitely long
+-- irrational number in order to know with certainty that the result is, in
+-- fact, exactly that rational number.
 module CFrac
-  ( CFrac (..),
+  ( -- * The 'CFrac' type
+    CFrac (..),
     isCanonical,
     terms,
+    fromTerms,
     convergents,
     toDecimal,
 
+    -- * Common continued fractions
+    sqrtInt,
     exactPi,
     exp1,
-    phi,
-    sqrtInt,
 
     GCFrac (..),
     toGCFrac,
@@ -32,6 +46,13 @@ import Data.Function (fix)
 import Data.Ratio (denominator, numerator, (%))
 import Test.QuickCheck (Arbitrary (..))
 
+-- | A real number represented as a sequence of terms, where each term is the
+-- integer part of the value, and the tail represents the reciprocal of the
+-- fractional part of the value.  @a :+/ b@ represents the value @a + 1 / b@.
+--
+-- Any rational number can be represented as a finite continued fraction, and
+-- any real number can be represented as an infinite continued fraction, making
+-- this a convenient representation for some forms of exact real arithmetic.
 data CFrac where
   (:+/) :: Integer -> CFrac -> CFrac
   Inf :: CFrac
@@ -46,10 +67,12 @@ instance Arbitrary CFrac where
   arbitrary = cfFromRational <$> arbitrary
   shrink = map cfFromRational . shrink . cfToRational
 
+-- | The list of terms for a continued fraction.
 terms :: CFrac -> [Integer]
 terms Inf = []
 terms (n :+/ x) = n : terms x
 
+-- | The continued fraction with the given list of terms.
 fromTerms :: [Integer] -> CFrac
 fromTerms = foldr (:+/) Inf
 
@@ -66,18 +89,11 @@ cfNegate :: CFrac -> CFrac
 cfNegate Inf = Inf
 cfNegate (n :+/ x) = (-n) :+/ cfNegate x
 
-cycleTerms :: [Integer] -> CFrac
-cycleTerms ns = fix (go ns)
-  where
-    go [] x = x
-    go (t : ts) x = t :+/ go ts x
-
-phi :: CFrac
-phi = cycleTerms [1]
-
+-- | Euler's constant, as a continued fraction.
 exp1 :: CFrac
 exp1 = 2 :+/ fromTerms (concatMap (\n -> [1, 2 * n, 1]) [1 ..])
 
+-- | Determines whether a continued fraction is in its canonical form.
 isCanonical :: CFrac -> Bool
 isCanonical Inf = True
 isCanonical (_ :+/ Inf) = True
@@ -100,6 +116,9 @@ isCanonicalNegative (n :+/ _) | n >= 0 = False
 isCanonicalNegative (-1 :+/ Inf) = False
 isCanonicalNegative (_ :+/ cont) = isCanonicalNegative cont
 
+-- | A mobius transformation, of the form @f(x) = (a * x + b) / (c * x + d)@.
+-- This is part of the machinery for performing arithmetic on continued
+-- fractions.
 data Mobius where
   Mobius :: Integer -> Integer -> Integer -> Integer -> Mobius
 
@@ -132,6 +151,10 @@ instance Arbitrary Mobius where
   shrink (Mobius a b c d) =
     [Mobius a' b' c' d' | (a', b', c', d') <- shrink (a, b, c, d)]
 
+-- | A list of convergents of a continued fraction.  These are, the best
+-- rational approximations to a given value of each continued fraction length.
+-- If the input is rational, the result is a finite list.  Otherwise, it's an
+-- infinite list.
 convergents :: CFrac -> [Rational]
 convergents = go mempty
   where
@@ -157,6 +180,9 @@ mobiusIntPart sgn (Mobius a b c d)
     n2 = b `quot` d
 {-# INLINE mobiusIntPart #-}
 
+-- | Converts a continued fraction to a list of digits in the given base.  The
+-- first element of the list is the whole number part, and the remainder are the
+-- fractional digits.
 toBase :: Int -> CFrac -> [Int]
 toBase base = go mempty
   where
@@ -168,6 +194,7 @@ toBase base = go mempty
     go m (n :+/ x) = go (m <> Mobius n 1 1 0) x
     go (Mobius a _ c _) Inf = go (Mobius a a c c) Inf
 
+-- | Converts a continued fraction to its decimal representation.
 toDecimal :: CFrac -> String
 toDecimal Inf = "Inf"
 toDecimal x
@@ -177,16 +204,31 @@ toDecimal x
       (z : digits) -> show z ++ "." ++ concatMap show digits
   | otherwise = "-" ++ toDecimal (cfNegate x)
 
+-- | A generalized continued fraction.  Whereas a standard continued fraction
+-- (also knows as a simple continued fraction) has the form @n + 1 / x@, a
+-- generalized continued fraction has the form @n + m / x@, which is here
+-- written as @(n, m) :+#/ x@.
+--
+-- Not all generalized continued fractions converge at all, and when they do,
+-- they are not unique.  However, some constants like pi, which don't have
+-- obvious patterns as continued fractions, do have obvious patterns as
+-- generalized continued fractions, making them a useful intermediate type for
+-- defining some exact real numbers.
 data GCFrac where
   (:+#/) :: (Integer, Integer) -> GCFrac -> GCFrac
   GInf :: GCFrac
 
 deriving instance Show GCFrac
 
+-- | Converts a simple continued fraction to a generalized continued fraction.
+-- All numerators will be 1.
 toGCFrac :: CFrac -> GCFrac
 toGCFrac Inf = GInf
 toGCFrac (n :+/ x) = (n, 1) :+#/ toGCFrac x
 
+-- | Converts a generalized continued fraction to a simple continued fraction.
+-- This will not terminate if the generalized continued fraction doesn't
+-- converge.
 fromGCFrac :: GCFrac -> CFrac
 fromGCFrac = go mempty
   where
@@ -201,11 +243,15 @@ gcfPi = (0, 4) :+#/ go 1
   where
     go i = (2 * i - 1, i * i) :+#/ go (i + 1)
 
+-- | Pi, as a continued fraction.
 exactPi :: CFrac
 exactPi = fromGCFrac gcfPi
 
+-- | The square root of a non-negative integer, as a continued fraction.
 sqrtInt :: Integer -> CFrac
-sqrtInt n = go 0 1
+sqrtInt n
+  | n < 0 = error "sqrtInt: negative argument"
+  | otherwise = go 0 1
   where
     isqrt :: Integer -> Integer
     isqrt 0 = 0
@@ -233,6 +279,7 @@ cfSignum (n :+/ Inf) = signum n
 cfSignum (a :+/ _) | a < 0 = -1
 cfSignum (0 :+/ (a :+/ _)) | a < 0 = -1
 cfSignum _ = 1
+{-# INLINE cfSignum #-}
 
 cfCompare :: CFrac -> CFrac -> Ordering
 cfCompare a b | sgnCmp /= EQ = sgnCmp
@@ -247,6 +294,7 @@ cfCompare (a :+/ a') (b :+/ b') = case compare a b of
 
 instance Ord CFrac where compare = cfCompare
 
+-- | Computes the value of a mobius transformation on a continued fraction.
 cfMobius :: Mobius -> CFrac -> CFrac
 cfMobius (Mobius a _ c _) Inf = cfFromFrac a c
 cfMobius (Mobius _ _ 0 0) _ = Inf
@@ -257,6 +305,10 @@ cfMobius m x
 cfMobius m (n :+/ x) = cfMobius (m <> Mobius n 1 1 0) x
 {-# INLINE [2] cfMobius #-}
 
+-- | A bimobius transformation, of the form @f(x, y) =
+-- (a * x * y + b * x + c * y + d) / (e * x * y + f * x + g * y + h)@.
+-- This is part of the machinery for performing arithmetic on continued
+-- fractions.
 data Bimobius where
   BM ::
     Integer ->
@@ -307,7 +359,10 @@ bimobiusIntPart sgnX sgnY (BM a b c d e f g h)
     n4 = d `quot` h
 {-# INLINE bimobiusIntPart #-}
 
--- | @(mob <>|| bimob) x y = mob (bimob x y)@
+-- | A composition that applies a mobius transformation to the output of a
+-- bimobius transformation, to obtain a combined bimobius transformation.
+--
+-- @(mob <>|| bimob) x y = mob (bimob x y)@
 (<>||) :: Mobius -> Bimobius -> Bimobius
 Mobius a1 b1 c1 d1 <>|| BM a2 b2 c2 d2 e2 f2 g2 h2 =
   BM a b c d e f g h
@@ -322,7 +377,10 @@ Mobius a1 b1 c1 d1 <>|| BM a2 b2 c2 d2 e2 f2 g2 h2 =
     h = c1 * d2 + d1 * h2
 {-# INLINE (<>||) #-}
 
--- | @(bimob ||< mob) x y = bimob (mob x) y@
+-- | A composition that applies a mobius transformation to the first argument of
+-- a bimobius transformation, to obtain a combined bimobius transformation.
+--
+-- @(bimob ||< mob) x y = bimob (mob x) y@
 (||<) :: Bimobius -> Mobius -> Bimobius
 BM a1 b1 c1 d1 e1 f1 g1 h1 ||< Mobius a2 b2 c2 d2 =
   BM a b c d e f g h
@@ -337,7 +395,10 @@ BM a1 b1 c1 d1 e1 f1 g1 h1 ||< Mobius a2 b2 c2 d2 =
     h = f1 * b2 + h1 * d2
 {-# INLINE (||<) #-}
 
--- | @(bimob ||> mob) x y = bimob x (mob y)@
+-- | A composition that applies a mobius transformation to the second argument
+-- of a bimobius transformation, to obtain a combined bimobius transformation.
+--
+-- @(bimob ||> mob) x y = bimob x (mob y)@
 (||>) :: Bimobius -> Mobius -> Bimobius
 BM a1 b1 c1 d1 e1 f1 g1 h1 ||> Mobius a2 b2 c2 d2 =
   BM a b c d e f g h
@@ -352,6 +413,8 @@ BM a1 b1 c1 d1 e1 f1 g1 h1 ||> Mobius a2 b2 c2 d2 =
     h = g1 * b2 + h1 * d2
 {-# INLINE (||>) #-}
 
+-- | Computes the value of a bimobius transformation on a pair of continued
+-- fractions.
 cfBimobius :: Bimobius -> CFrac -> CFrac -> CFrac
 cfBimobius (BM a b _ _ e f _ _) Inf y = cfMobius (Mobius a b e f) y
 cfBimobius (BM a _ c _ e _ g _) x Inf = cfMobius (Mobius a c e g) x
@@ -395,6 +458,7 @@ instance Num CFrac where
   negate = cfNegate
   {-# INLINE negate #-}
 
+-- | 'toRational' only terminates for rational inputs.
 instance Real CFrac where
   toRational = cfToRational
   {-# INLINE toRational #-}
