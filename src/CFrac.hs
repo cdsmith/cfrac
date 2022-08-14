@@ -27,13 +27,14 @@ module CFrac
     exactPi,
     exp1,
 
+    -- * Generalized continued fractions
     GCFrac (..),
     toGCFrac,
     fromGCFrac,
 
+    -- * Implementation details
     Mobius (..),
     cfMobius,
-
     Bimobius (..),
     cfBimobius,
     (<>||),
@@ -42,7 +43,6 @@ module CFrac
   )
 where
 
-import Data.Function (fix)
 import Data.Ratio (denominator, numerator, (%))
 import Test.QuickCheck (Arbitrary (..))
 
@@ -64,8 +64,8 @@ deriving instance Show CFrac
 infixr 5 :+/
 
 instance Arbitrary CFrac where
-  arbitrary = cfFromRational <$> arbitrary
-  shrink = map cfFromRational . shrink . cfToRational
+  arbitrary = fromRational <$> arbitrary
+  shrink = map fromRational . shrink . cfToRational
 
 -- | The list of terms for a continued fraction.
 terms :: CFrac -> [Integer]
@@ -80,10 +80,6 @@ cfFromFrac :: Integer -> Integer -> CFrac
 cfFromFrac _ 0 = Inf
 cfFromFrac n d = q :+/ cfFromFrac d r where (q, r) = n `quotRem` d
 {-# INLINE [2] cfFromFrac #-}
-
-cfFromRational :: Rational -> CFrac
-cfFromRational r = cfFromFrac (numerator r) (denominator r)
-{-# INLINE cfFromRational #-}
 
 cfNegate :: CFrac -> CFrac
 cfNegate Inf = Inf
@@ -473,7 +469,7 @@ instance RealFrac CFrac where
   {-# INLINE properFraction #-}
 
 instance Fractional CFrac where
-  fromRational = cfFromRational
+  fromRational r = cfFromFrac (numerator r) (denominator r)
   {-# INLINE fromRational #-}
 
   recip = cfRecip
@@ -485,6 +481,9 @@ instance Fractional CFrac where
 {-# RULES
 "cfrac/cfRecip" forall x. cfRecip (cfRecip x) = x
 "cfrac/intToRat" forall n. cfToRational (n :+/ Inf) = fromInteger n
+"cfrac/ratToRat" forall p q.
+  cfToRational (cfFromFrac p q) =
+    fromInteger p / fromInteger q
   #-}
 
 {-# RULES
