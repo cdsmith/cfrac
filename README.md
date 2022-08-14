@@ -1,3 +1,5 @@
+[![CI](https://github.com/cdsmith/cfrac/actions/workflows/ci.yml/badge.svg)](https://github.com/cdsmith/cfrac/actions/workflows/ci.yml)
+
 This is the code that goes along with my blog post at
 https://cdsmithus.medium.com/continued-fractions-haskell-equational-reasoning-property-testing-and-rewrite-rules-in-action-77a16d750e3f
 
